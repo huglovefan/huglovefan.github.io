@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>pixel clock calculator clone</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<style>
+		html { font: 10pt sans-serif; }
+		.row { margin: 0.5em 0; }
+		label.row { display: block; }
+		div, .block { display: block; margin-bottom: 1px; }
+		summary {
+			display: inline-block;
+			cursor: pointer;
+		}
+		details {
+			outline: none;
+		}
+		p { margin: 0.5em 0; }
+		details { margin-bottom: 0.7em; }
+	</style>
+</head>
+<body>
+	<details>
+	<summary>readme.txt (click to expand)</summary>
+	<p>this is an "open source" clone of <a target="_blank" rel="nofollow noopener noreferrer" href="https://www.monitortests.com/pixelclock.php">Pixel Clock Calculator - Monitor Tests</a></p>
+	<p>recommended literature:</p>
+	<ul style="margin: 0.2em 0 0.5em 0;">
+	<li><a target="_blank" rel="nofollow noopener noreferrer" href="https://en.wikipedia.org/wiki/XFree86_Modeline">XFree86 Modeline - Wikipedia</a></li>
+	<li><a target="_blank" rel="nofollow noopener noreferrer" href="https://arachnoid.com/modelines/">modeline explainer (arachnoid.com)</a></li>
+	<li><a target="_blank" rel="nofollow noopener noreferrer" href="http://howto-pages.org/ModeLines/">modeline explainer (howto-pages.org)</a></li>
+	<li><a target="_blank" rel="nofollow noopener noreferrer" href="http://madvr.com/crt/CustomResTutorial.html">madvr custom res explainer</a></li>
+	<li><a target="_blank" rel="nofollow noopener noreferrer" href="https://rbt.asia/g/thread/51288114/#51295978">how to get a modeline from this output</a></li>
+	</ul>
+	<p>hint: this page is contained in a single file, so you can save it using ctrl+s and use it offline</p>
+	</details>
+
+	<h2 style="margin-top: 0.2em;">Resolution</h2>
+	<div class="row">
+		<input type="text" size="3" id="width">
+		x
+		<input type="text" size="3" id="height">
+		@
+		<label>
+			<input type="text" size="6" id="refresh">
+			Hz
+		</label>
+		<label>
+			<input type="checkbox" id="rate">
+			Rate / 1.001
+		</label>
+	</div>
+	<div class="row"><label>
+		Pixel clock decimal places (0-6):
+		<input type="text" size="3" id="decimals">
+	</label></div>
+	<div class="row">
+		<input type="button" value="Calculate" id="submit">
+		<noscript>
+		<span style="color: yellow; background: black; border: 3px dashed; font-weight: bold; padding: 2px 4px; line-height: 2;">
+			enable javascript to use this!! (or tell me how i can implement it using html and css only)
+		</span>
+		</noscript>
+	</div>
+
+	<h2>Parameters</h2>
+	<div class="row">
+		<div><label>
+			Minimum horizontal blanking:
+			<input type="text" size="3" id="minhblank">
+		</label></div>
+		<div><label>
+			Maximum horizontal blanking:
+			<input type="text" size="3" id="maxhblank">
+		</label>
+		<label>
+			Multiple:
+			<input type="text" size="3" id="hmultiple">
+		</label></div>
+	</div>
+	<div class="row">
+		<div><label>
+			Minimum vertical blanking:
+			<input type="text" size="3" id="minvblank">
+		</label></div>
+		<div><label>
+			Maximum vertical blanking:
+			<input type="text" size="3" id="maxvblank">
+		</label>
+		<label>
+			Multiple:
+			<input type="text" size="3" id="vmultiple">
+		</label></div>
+	</div>
+	<div class="row">
+		<div>
+			<label>
+				<input type="checkbox" id="limitpclock">
+				Maximum pixel clock:
+			</label>
+			<label>
+				<input type="text" size="3" id="maxpclock">
+				Mhz
+			</label>
+		</div>
+		<!--<div>
+			<label>
+				<input type="checkbox">
+				Sort by vertical total
+			</label>
+		</div>-->
+	</div>
+	<div class="row" style="margin-top: 1em;">
+		<input type="button" value="Reset all" id="reset">
+	</div>
+
+	<h2>Results</h2>
+	<pre id="output"></pre>
+</body>
+<script>
+
+var defaults = {
+	width: 1920,
+	height: 1080,
+	refresh: 60,
+	rate: true,
+
+	decimals: 3,
+
+	minhblank: 24, // was 56
+	maxhblank: 480,
+	hmultiple: 8,
+
+	minvblank: 3, // was 5
+	maxvblank: 120,
+	vmultiple: 1,
+
+	limitpclock: false,
+	maxpclock: 165,
+};
+var get1 = function(k) {
+	switch (typeof(defaults[k])) {
+	case "number": return Number(document.getElementById(k).value);
+	case "boolean": return document.getElementById(k).checked;
+	default: throw new TypeError();
+	}
+};
+var set1 = function(k, v) {
+	switch (typeof(defaults[k])) {
+	case "number": document.getElementById(k).value = v; break;
+	case "boolean": document.getElementById(k).checked = v; break;
+	default: throw new TypeError();
+	}
+};
+var collect = function() {
+	var t = {};
+	for (var k in defaults) {
+		t[k] = get1(k);
+	}
+	return t;
+};
+var reset = function() {
+	for (var k in defaults) {
+		set1(k, defaults[k]);
+	}
+};
+
+var p;
+
+var mode_sort_function = function(m1, m2) {
+	if (m1.exact && !m2.exact) return -1;
+	if (!m1.exact && m2.exact) return 1;
+	if (m1.exact) {
+		return (m1.pclock < m2.pclock) ? -1 : 1;
+	} else {
+		var diff1 = Math.abs(m1.hz - p.refresh);
+		var diff2 = Math.abs(m2.hz - p.refresh);
+		if (diff1.toFixed(9) !== diff2.toFixed(9)) return (diff1 < diff2) ? -1 : 1;
+		return (m1.pclock < m2.pclock) ? -1 : 1;
+	}
+};
+
+var calculate = function() {
+	p = collect();
+	var output = [];
+
+	if (p.rate) {
+		p.refresh /= 1.001;
+	}
+
+	var modes = [];
+	var mult = Math.pow(10, 6 - p.decimals);
+	for (var hblank = p.width+p.minhblank; hblank <= p.width+p.maxhblank; hblank += p.hmultiple) {
+		for (var vblank = p.height+p.minvblank; vblank <= p.height+p.maxvblank; vblank += p.vmultiple) {
+			var m = {};
+			m.hblank = hblank;
+			m.vblank = vblank;
+
+			// arachnoid.com: "Refresh rate * HTotal * VTotal = Dot-Clock"
+			// note: this is in Hz
+			var pc1 = Math.round(p.refresh * (hblank * vblank));
+			// round it so that it has the right number of decimals when converted to MHz
+			var pc2 = Math.round(Math.round(pc1 / mult) * mult);
+			m.pclock = pc2;
+
+			// wikipedia: "Vfreq = pclk / (htotal * vtotal)"
+			m.hz = m.pclock / (hblank * vblank);
+
+			// determine exactness
+			// this seems to be how the original pixel clock calculator does it
+			// (determined by comparing outputs)
+			m.exact = Math.abs(m.hz-p.refresh) < 0.0000000001;
+			// at first i was trying to do it properly(?) by
+			// - checking if the calculated refresh rate is exactly what was requested
+			// - checking if rounding changed the pixel clock value (i think there was some problem with this)
+			// but the output would always be slightly different from the original's
+			// eventually i figured out they might be doing something stupid(?) like
+			// - this thing
+			// - comparing the refresh rates as strings (worse version of "this thing")
+			// i am no expert but i would've thought "exact" meant 100% and not 99.99999999%
+
+			modes.push(m);
+		}
+	}
+
+	modes.sort(mode_sort_function);
+
+	output.push("" + p.width + "x" + p.height + " @ " +
+	    p.refresh.toFixed(6) + " Hz (" + p.decimals +
+	    " decimal place" + (p.decimals !== 1 ? "s" : "") + ")\n\n");
+
+	var max_inexact = 50;
+	for (var i = 0; i < modes.length; i++) {
+		var m = modes[i];
+		if (p.limitpclock && m.pclock > p.maxpclock*1000000) continue;
+		var s = "";
+		s += (m.pclock/1000000).toFixed(p.decimals);
+		s += " MHz    ";
+		s += m.hblank;
+		s += " x ";
+		s += m.vblank;
+		s += " @ ";
+		s += m.hz.toFixed(9);
+		s += " Hz    ";
+		if (m.exact) s += "(exact)\n";
+		else {
+			s += "(";
+			if (m.hz >= p.refresh)
+				s += "+";
+			s += (m.hz - p.refresh).toFixed(9);
+			s += " Hz)\n";
+		}
+		output.push(s);
+		if (!m.exact && --max_inexact <= 0) break;
+	}
+
+	document.getElementById("output").textContent = output.join("");
+};
+
+reset();
+p = collect();
+
+document.getElementById("submit").addEventListener("click", calculate);
+document.getElementById("reset").addEventListener("click", reset);
+
+</script>
+</html>
